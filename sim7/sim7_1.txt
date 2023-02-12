@@ -1,0 +1,307 @@
+import io
+import telegram
+import numpy as np
+import pandas as pd
+import datetime as dt
+import pandahouse as ph
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+from airflow.decorators import dag, task
+from airflow.operators.python import get_current_context
+
+default_args = {
+    'owner': 'gvinopal',
+    'depends_on_past': False,
+    'retries': 2,
+    'retry_delay': dt.timedelta(minutes=5),
+    'start_date': dt.datetime(2023, 1, 1),
+}
+
+schedule_interval = '0 11 * * *'
+
+connection = {
+    'host': 'https://clickhouse.lab.karpov.courses',
+    'password': 'dpo_python_2020',
+    'user': 'student',
+    'database': 'simulator'
+}
+
+my_token='5879848815:AAEjsIFCIOeCVxF18znOsh-PvkuIVqpyeHU'
+chat_it = 534065724
+bot = telegram.Bot(token=my_token)
+
+
+# Функция для DAG'а
+@dag(default_args=default_args, schedule_interval=schedule_interval, catchup=False)
+def a_adag_gv_71():
+
+    @task
+    def getDAU1d():
+
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+
+        DAU_sql = """select count(DISTINCT  user_id) as "DAU yesterday"
+                    FROM simulator_20230120.feed_actions
+                    WHERE time >= yesterday()
+                    and time < today()"""
+
+
+        # Вытащили активных пользователей за вчера
+        users_df = ph.read_clickhouse(DAU_sql, connection=connection)
+        return users_df['DAU yesterday'][0]
+
+    @task
+    def get_activitiess1d(connection=connection):
+
+        likes_sql = """select
+          count(DISTINCT  user_id) as "DAU yesterday",
+          countIf(user_id, action='like') as "likes",
+          countIf(user_id, action='view') AS "views",
+          round(countIf(user_id, action='like') / countIf(user_id, action='view'),2) AS "CTR"
+        FROM
+          simulator_20230120.feed_actions
+        WHERE
+          time >= yesterday()
+          and time < today()
+          """
+
+        users_df = ph.read_clickhouse(likes_sql, connection=connection).values[0]
+        return users_df
+
+    
+    @task
+    def getLikes1d():
+
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+
+        likes_sql = """select
+          count(user_id ) as "likes"
+        FROM
+          simulator_20230120.feed_actions
+        WHERE
+          time >= yesterday()
+          and time < today()
+          and action='like'"""
+
+        users_df = ph.read_clickhouse(likes_sql, connection=connection)
+        return users_df['likes'][0]
+
+    @task
+    def getViews1d():
+
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+
+        views_sql = """select
+          count(user_id ) as "view"
+        FROM
+          simulator_20230120.feed_actions
+        WHERE
+          time >= yesterday()
+          and time < today()
+          and action='view'"""
+
+        users_df = ph.read_clickhouse(views_sql, connection=connection)
+        return users_df['view'][0]
+
+
+    @task
+    def geCTR1d():
+
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+        ctr_sql = """SELECT 
+         round(countIf(user_id, action='like') / countIf(user_id, action='view'),2) AS "CTR"
+        FROM simulator_20230120.feed_actions
+        where  time >= yesterday() and time < today()"""
+
+
+        users_df = ph.read_clickhouse(ctr_sql, connection=connection)
+        return users_df['CTR'][0]
+
+    @task
+    def getCTR7d_plot():
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+        ctr7d_sql = """SELECT toStartOfDay(toDateTime(time)) AS __timestamp,
+                    countIf(user_id, action='like') / countIf(user_id, action='view') AS "CTR"
+                    FROM simulator_20230120.feed_actions
+                    where  time >= today() - 6
+                    GROUP BY toStartOfDay(toDateTime(time))
+                    ORDER BY __timestamp DESC
+                    LIMIT 10"""
+
+        users_df = ph.read_clickhouse(ctr7d_sql, connection=connection)
+
+        sns.lineplot(data=users_df, x="__timestamp", y="CTR")
+        plt.title('CTR 7 days')
+
+        plot_object  = io.BytesIO() #
+        plt.savefig(plot_object)
+        plot_object.seek(0)
+        plot_object.name= 'CTR7d.png'
+        plt.close()
+
+        return plot_object
+
+    @task
+    def get_likes7d_plot():
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+        ctr7d_sql = """SELECT toStartOfDay(toDateTime(time)) AS __timestamp,
+                    countIf(user_id, action='like') AS "likes"
+                    FROM simulator_20230120.feed_actions
+                    where  time >= today() - 6
+                    GROUP BY toStartOfDay(toDateTime(time))
+                    ORDER BY __timestamp DESC
+                    LIMIT 10"""
+
+        users_df = ph.read_clickhouse(ctr7d_sql, connection=connection)
+
+        sns.lineplot(data=users_df, x="__timestamp", y="likes")
+        plt.title('likes 7 days')
+
+        plot_object  = io.BytesIO() #
+        plt.savefig(plot_object)
+        plot_object.seek(0)
+        plot_object.name= 'likes7d.png'
+        plt.close()
+
+        return plot_object
+
+
+    @task
+    def get_views7d_plot():
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+        ctr7d_sql = """SELECT toStartOfDay(toDateTime(time)) AS __timestamp,
+                    countIf(user_id, action='view') AS "views"
+                    FROM simulator_20230120.feed_actions
+                    where  time >= today() - 6
+                    GROUP BY toStartOfDay(toDateTime(time))
+                    ORDER BY __timestamp DESC
+                    LIMIT 10"""
+
+        users_df = ph.read_clickhouse(ctr7d_sql, connection=connection)
+
+        sns.lineplot(data=users_df, x="__timestamp", y="views")
+        plt.title('likes 7 days')
+
+        plot_object  = io.BytesIO() #
+        plt.savefig(plot_object)
+        plot_object.seek(0)
+        plot_object.name= 'views7d.png'
+        plt.close()
+
+        return plot_object
+
+    @task
+    def get_dau7d_plot():
+        connection = {
+            'host': 'https://clickhouse.lab.karpov.courses',
+            'password': 'dpo_python_2020',
+            'user': 'student',
+            'database': 'simulator'
+        }
+
+        ctr7d_sql = """SELECT toStartOfDay(toDateTime(time)) AS __timestamp,
+                        count(DISTINCT  user_id) as "DAU"
+                    FROM simulator_20230120.feed_actions
+                    where  time >= today() - 6
+                    GROUP BY toStartOfDay(toDateTime(time))
+                    ORDER BY __timestamp DESC
+                    LIMIT 10"""
+
+        users_df = ph.read_clickhouse(ctr7d_sql, connection=connection)
+
+        sns.lineplot(data=users_df, x="__timestamp", y="DAU")
+        plt.title('dau 7 days')
+
+        plot_object  = io.BytesIO() #
+        plt.savefig(plot_object)
+        plot_object.seek(0)
+        plot_object.name= 'dau7d.png'
+        plt.close()
+
+        return plot_object
+        
+    @task
+    def send_msg(df):
+        # dau = df["DAU yesterday"][0]
+        # viwes = df["likes"][0]
+        # likes = df[ "views"][0]
+        # ctr = df["CTR"][0]
+        # msg = f"Ключевых метрик за предыдущий день :\nDAU:{dau},\nПросмотры:{viwes},\nЛайки:{likes},\nCTR:{ctr}"
+        msg = "privet"
+        bot.sendMessage(chat_id=chat_it, text=msg)
+             
+    dau = getDAU1d()
+    viwes = getViews1d()
+    likes = getLikes1d()
+    ctr = geCTR1d()
+    df = get_activitiess1d()
+    send_msg(df)
+
+    dau = df[0]
+    viwes = df[1]
+    likes = df[2]
+    ctr = df[3]
+    msg = f'Ключевых метрик за предыдущий день :\nDAU:{dau},\nПросмотры:{viwes},\nЛайки:{likes},\nCTR:{ctr}'
+    bot.sendMessage(chat_id=chat_it, text=msg)   
+    
+#     msg = f"Ключевых графики за предыдущие 7 дней:\n"
+#     bot.sendMessage(chat_id=chat_it, text=msg)
+
+#     plot1 = getCTR7d_plot()
+#     bot.sendPhoto(chat_id=chat_it, photo=plot1)
+
+#     plot2 = get_dau7d_plot()
+#     bot.sendPhoto(chat_id=chat_it, photo=plot2)
+
+#     plot3 = get_views7d_plot()
+#     bot.sendPhoto(chat_id=chat_it, photo=plot3)
+
+#     plot4 = get_likes7d_plot()
+#     bot.sendPhoto(chat_id=chat_it, photo=plot4)
+
+#run everithing
+a_adag_gv_71 = a_adag_gv_71()
